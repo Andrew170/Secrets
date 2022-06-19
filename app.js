@@ -4,13 +4,15 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-var encrypt = require('mongoose-encryption');
-const { encryptedChildren } = require("mongoose-encryption");
+const session = require('express-session');
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+
 
 
 const app = express();
 
-// GET API KEY FROM EXTERNAL FILE
+// GET API KEY FROM EXTERNAL FILE specifically the .env file
 // console.log(process.env.API_KEY);
 
 
@@ -24,8 +26,26 @@ app.use(bodyParser.urlencoded({
     extended:true
 }));
 
+
+
+app.use(session({
+    secret : "Andrew Einarsen",
+    resave : false,
+    saveUninitialized: false
+}));
+
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+
+
+
+
+
 // makes use of npm module mongoose to start server on mongodb
 mongoose.connect("mongodb://localhost:27017/userDB", {useNewURlParser:true});
+// mongoose.set("useCreateIndex", true);
 
 
 
@@ -35,10 +55,20 @@ const userSchema = new mongoose.Schema ({
 });
 
 
+userSchema.plugin(passportLocalMongoose);
 
-userSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields: ["password"] });
+
+
+
+
+// userSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields: ["password"] });
 
 const User = new mongoose.model("User", userSchema);
+
+
+passport.use(User.createStrategy());
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 
 
@@ -59,44 +89,61 @@ app.get("/register",function(req, res){
 });
 
 
+app.get("/secrets", function(req, res){
+    if (req.isAuthenticated()){
+        res.render("secrets");
+    } else{
+        res.redirect("/login")
+    }
+});
+
+app.get("/logout", function(req, res){
+    req.logout(function(err) {
+        if (err) { return next(err); }
+    res.redirect("/");
+    });
+});
+
+
+
+
 // catches when submit button is triggered and posts the data to the database
 app.post("/register", function(req, res){
-    // makes use of the setup schema and creates a new user entry for the database
-    const newUser = new User({
-        // sets up the keys for the database and the information that is typed in from the username and password inputs
-        email : req.body.username,
-        password: req.body.password
-    });
-
-    newUser.save(function(err){
-        if (err){
+    // creates a user for the database using passport local mongoose module
+    User.register({username : req.body.username}, req.body.password, function(err, user){
+        if(err){
             console.log(err);
-        } else {
-            res.render("secrets");
+            res.redirect("/register");
+        }else{
+            passport.authenticate("local")(req, res, function(){
+                res.redirect("/secrets");
+            });
         }
     });
-
 });
 
 
 
 app.post("/login", function(req, res){
-    const username = req.body.username;
-    const password = req.body.password;
-    
-    User.findOne({email: username}, function(err, foundUser){
-        if(err){
-            console.log(err);
-        }else{
-            if(foundUser){
-                if (foundUser.password === password){
-                    res.render("secrets");
 
-                }
-            }
-        }
+    const user = new User({
+        username : req.body.username,
+        password : req.body.password
     });
+
+    req.logIn(user, function(err){
+        if (err){
+            console.log(err)
+        }else{
+            passport.authenticate("local")(req, res, function(){
+                res.redirect("/secrets");
+            });
+        }
+
+    });
+
 });
+
 
 
 
